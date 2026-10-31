@@ -1,0 +1,6 @@
+{
+  "name": "Abhinavas Eye Care IP management",
+  "description": "Hospital management system for Abhinavas Eye Care featuring PIN authentication, staff management, patient registration and records, billing, and audit trail.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
