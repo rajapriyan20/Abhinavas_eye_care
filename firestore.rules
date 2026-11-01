@@ -1,0 +1,32 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidComment(data) {
+      return data.keys().hasAll(['content', 'authorName', 'tab', 'xPercent', 'yPercent', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'content', 'authorName', 'authorRole', 'tab', 'targetDescription', 'xPercent', 'yPercent', 'createdAt', 'updatedAt']) &&
+        data.content is string && data.content.size() > 0 && data.content.size() <= 2000 &&
+        data.authorName is string && data.authorName.size() > 0 && data.authorName.size() <= 100 &&
+        data.tab is string && data.tab.size() <= 50 &&
+        data.xPercent is number && data.xPercent >= 0 && data.xPercent <= 100 &&
+        data.yPercent is number && data.yPercent >= 0 && data.yPercent <= 100 &&
+        data.createdAt is string && data.createdAt.size() <= 40;
+    }
+
+    match /dev_comments/{commentId} {
+      allow read: if isValidId(commentId);
+      allow create: if isValidId(commentId) && isValidComment(request.resource.data);
+      allow update: if isValidId(commentId) && isValidComment(request.resource.data);
+      allow delete: if isValidId(commentId);
+    }
+  }
+}

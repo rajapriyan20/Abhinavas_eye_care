@@ -10,7 +10,7 @@ The repository is configured with a GitHub Actions workflow located at:
 `.github/workflows/deploy.yml`
 
 ### How It Works
-1. Every time you push code to the `main` or `master` branch (e.g. directly from AI Studio's Git sync or command line), GitHub Actions automatically triggers.
+1. Every time you push code to the `main` or `master` branch (e.g. directly from git push or your code repository), GitHub Actions automatically triggers.
 2. The workflow:
    - Checks out the latest commit.
    - Installs all dependencies (`npm install`).

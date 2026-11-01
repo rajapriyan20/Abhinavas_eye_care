@@ -12,9 +12,10 @@ import {
   Settings,
   Receipt,
   BarChart3,
+  MessageSquareText,
 } from 'lucide-react';
 
-export type TabType = 'overview' | 'patients' | 'counselling' | 'billing' | 'reports' | 'settings' | 'users' | 'audit';
+export type TabType = 'overview' | 'patients' | 'counselling' | 'billing' | 'reports' | 'dev_feedback' | 'settings' | 'users' | 'audit';
 
 interface SidebarProps {
   activeTab: TabType;
@@ -63,6 +64,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Reports',
       sublabel: 'Admissions, Surgeries & Audit',
       icon: BarChart3,
+    },
+    {
+      id: 'dev_feedback' as const,
+      label: 'Dev Comments',
+      sublabel: 'Feedback & Screen Pins',
+      icon: MessageSquareText,
     },
     {
       id: 'settings' as const,

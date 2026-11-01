@@ -1,0 +1,63 @@
+{
+  "entities": {
+    "DevComment": {
+      "title": "DevComment",
+      "description": "Development feedback comment placed on the application interface",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique comment identifier"
+        },
+        "content": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Comment or feedback message text"
+        },
+        "authorName": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Name or username of the staff member who commented"
+        },
+        "authorRole": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Staff role of the author"
+        },
+        "tab": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Active tab ID when the comment was pinned"
+        },
+        "targetDescription": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Descriptive context of the element or region clicked"
+        },
+        "xPercent": {
+          "type": "number",
+          "description": "Horizontal position percentage across viewport"
+        },
+        "yPercent": {
+          "type": "number",
+          "description": "Vertical position percentage across viewport"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp when the comment was created"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp when the comment was last edited"
+        }
+      },
+      "required": ["content", "authorName", "tab", "xPercent", "yPercent", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/dev_comments/{commentId}": {
+      "schema": "DevComment",
+      "description": "Collection of development feedback comments pinned across the workstation"
+    }
+  }
+}

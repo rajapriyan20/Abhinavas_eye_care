@@ -267,4 +267,17 @@ export interface PatientBillingSummary {
   financialStatus: 'Cleared' | 'Outstanding' | 'Refundable';
 }
 
+export interface DevComment {
+  id: string;
+  content: string;
+  authorName: string;
+  authorRole?: string;
+  tab: string;
+  targetDescription?: string;
+  xPercent: number;
+  yPercent: number;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 

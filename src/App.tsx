@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { User, Patient } from './types';
+import { User, Patient, DevComment } from './types';
 import { ApiClient } from './api/client';
 import { Header } from './components/Header';
 import { Sidebar, TabType } from './components/Sidebar';
@@ -16,6 +16,8 @@ import { BillingModule } from './components/billing/BillingModule';
 import { ReportsModule } from './components/reports/ReportsModule';
 import { SettingsModule } from './components/SettingsModule';
 import { UserManagement } from './components/UserManagement';
+import { DevFeedbackModule } from './components/dev/DevFeedbackModule';
+import { DevCommentOverlay } from './components/dev/DevCommentOverlay';
 
 import { DualAdapterModal } from './components/DualAdapterModal';
 import { Monitor } from 'lucide-react';
@@ -29,6 +31,16 @@ export default function App() {
   const [isAdapterModalOpen, setIsAdapterModalOpen] = useState(false);
   const [isLiveServerMode, setIsLiveServerMode] = useState(false);
   const [isScreenTooSmall, setIsScreenTooSmall] = useState(false);
+  const [highlightedCommentId, setHighlightedCommentId] = useState<string | null>(null);
+
+  const handleJumpToComment = (comment: DevComment) => {
+    setActiveTab(comment.tab as TabType);
+    setHighlightedCommentId(comment.id);
+    // Auto clear pulse highlight after 5 seconds
+    setTimeout(() => {
+      setHighlightedCommentId(null);
+    }, 5000);
+  };
 
   // Load session & data
   const loadData = useCallback(async () => {
@@ -170,6 +182,13 @@ export default function App() {
             />
           )}
 
+          {activeTab === 'dev_feedback' && (
+            <DevFeedbackModule
+              currentUser={currentUser}
+              onJumpToComment={handleJumpToComment}
+            />
+          )}
+
           {activeTab === 'settings' && (
 
             <SettingsModule
@@ -201,6 +220,15 @@ export default function App() {
         isOpen={isAdapterModalOpen}
         onClose={() => setIsAdapterModalOpen(false)}
         onDataReset={loadData}
+      />
+
+      {/* Development Feedback Overlay: Right-click disable & screen balloon markers */}
+      <DevCommentOverlay
+        currentUser={currentUser}
+        activeTab={activeTab}
+        onNavigateTab={tab => setActiveTab(tab)}
+        highlightedCommentId={highlightedCommentId}
+        onClearHighlight={() => setHighlightedCommentId(null)}
       />
     </div>
   );
