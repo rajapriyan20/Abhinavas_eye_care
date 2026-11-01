@@ -109,7 +109,7 @@ export const FirebaseService = {
       },
       error => {
         try {
-          handleFirestoreError(error, OperationType.GET, COMMENTS_COLLECTION);
+          handleFirestoreError(error, OperationType.LIST, COMMENTS_COLLECTION);
         } catch (e) {
           if (onError && e instanceof Error) onError(e);
         }

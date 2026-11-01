@@ -7,6 +7,10 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /test/{docId} {
+      allow get: if true;
+    }
+
     function isValidId(id) {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
@@ -19,11 +23,16 @@ service cloud.firestore {
         data.tab is string && data.tab.size() <= 50 &&
         data.xPercent is number && data.xPercent >= 0 && data.xPercent <= 100 &&
         data.yPercent is number && data.yPercent >= 0 && data.yPercent <= 100 &&
-        data.createdAt is string && data.createdAt.size() <= 40;
+        data.createdAt is string && data.createdAt.size() <= 40 &&
+        (!('id' in data) || isValidId(data.id)) &&
+        (!('authorRole' in data) || (data.authorRole is string && data.authorRole.size() <= 50)) &&
+        (!('targetDescription' in data) || (data.targetDescription is string && data.targetDescription.size() <= 200)) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 40));
     }
 
     match /dev_comments/{commentId} {
-      allow read: if isValidId(commentId);
+      allow get: if isValidId(commentId);
+      allow list: if true;
       allow create: if isValidId(commentId) && isValidComment(request.resource.data);
       allow update: if isValidId(commentId) && isValidComment(request.resource.data);
       allow delete: if isValidId(commentId);
