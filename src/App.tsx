@@ -13,6 +13,7 @@ import { DashboardOverview } from './components/DashboardOverview';
 import { PatientList } from './components/PatientList';
 import { CounsellingModule } from './components/CounsellingModule';
 import { BillingModule } from './components/billing/BillingModule';
+import { ReportsModule } from './components/reports/ReportsModule';
 import { SettingsModule } from './components/SettingsModule';
 import { UserManagement } from './components/UserManagement';
 
@@ -159,6 +160,13 @@ export default function App() {
               currentUser={currentUser}
               patients={patients}
               onNavigateToSettings={() => setActiveTab('settings')}
+            />
+          )}
+
+          {activeTab === 'reports' && (
+            <ReportsModule
+              currentUser={currentUser}
+              patients={patients}
             />
           )}
 

@@ -9,17 +9,20 @@ import {
   PaymentMode,
   BillPaymentStatus,
   PatientBillingSummary,
+  Estimate,
+  EstimateStatus,
+  ConsumableSetting,
+  BillItemCategory,
 } from '../../types';
 import { ApiClient } from '../../api/client';
 import { BillPrintModal } from './BillPrintModal';
 import { ReceiptPrintModal } from './ReceiptPrintModal';
 import { BillingSummaryPrintModal } from './BillingSummaryPrintModal';
+import { EstimatePrintModal } from './EstimatePrintModal';
 import {
   Receipt as ReceiptIcon,
   Plus,
   Search,
-  Filter,
-  DollarSign,
   Printer,
   Edit2,
   Trash2,
@@ -33,11 +36,11 @@ import {
   ArrowRight,
   TrendingUp,
   CreditCard,
-  Building,
   Calendar,
   X,
-  FileCheck,
-  ShieldAlert,
+  Calculator,
+  RefreshCw,
+  Package,
 } from 'lucide-react';
 
 interface BillingModuleProps {
@@ -51,24 +54,30 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
   patients,
   onNavigateToSettings,
 }) => {
-  const [activeTab, setActiveTab] = useState<'bills' | 'receipts' | 'summary'>('bills');
+  // Tab state: 'estimates' before 'bills' as requested
+  const [activeTab, setActiveTab] = useState<'estimates' | 'bills' | 'receipts' | 'summary'>('estimates');
+  const [estimates, setEstimates] = useState<Estimate[]>([]);
   const [bills, setBills] = useState<Bill[]>([]);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [counsellingRecords, setCounsellingRecords] = useState<CounsellingRecord[]>([]);
+  const [consumablesRateCard, setConsumablesRateCard] = useState<ConsumableSetting[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [modeFilter, setModeFilter] = useState<string>('all');
 
   // Print Modals
+  const [selectedEstimateForPrint, setSelectedEstimateForPrint] = useState<Estimate | null>(null);
   const [selectedBillForPrint, setSelectedBillForPrint] = useState<Bill | null>(null);
   const [selectedReceiptForPrint, setSelectedReceiptForPrint] = useState<Receipt | null>(null);
   const [selectedSummaryForPrint, setSelectedSummaryForPrint] = useState<PatientBillingSummary | null>(null);
 
-  // Bill Edit/Create Modal State
+  // Modals for Create / Edit
+  const [isEstimateModalOpen, setIsEstimateModalOpen] = useState(false);
+  const [editingEstimate, setEditingEstimate] = useState<Estimate | null>(null);
+
   const [isBillModalOpen, setIsBillModalOpen] = useState(false);
   const [editingBill, setEditingBill] = useState<Bill | null>(null);
 
-  // Receipt Create Modal State
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
   const [preselectedBillId, setPreselectedBillId] = useState<string>('');
 
@@ -76,14 +85,21 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
   const [summaryPatientId, setSummaryPatientId] = useState<string>('');
   const [patientSummaryData, setPatientSummaryData] = useState<PatientBillingSummary | null>(null);
 
-  // Load all billing data
+  // Load all billing & rate card data
   const loadBillingData = async () => {
-    const fetchedBills = await ApiClient.getBills();
-    const fetchedReceipts = await ApiClient.getReceipts();
-    const fetchedCounselling = await ApiClient.getCounsellingRecords();
+    const [fetchedEstimates, fetchedBills, fetchedReceipts, fetchedCounselling, fetchedConsumables] = await Promise.all([
+      ApiClient.getEstimates(),
+      ApiClient.getBills(),
+      ApiClient.getReceipts(),
+      ApiClient.getCounsellingRecords(),
+      ApiClient.getConsumables(),
+    ]);
+
+    setEstimates(fetchedEstimates);
     setBills(fetchedBills);
     setReceipts(fetchedReceipts);
     setCounsellingRecords(fetchedCounselling);
+    setConsumablesRateCard(fetchedConsumables);
 
     if (summaryPatientId) {
       const summary = await ApiClient.getPatientBillingSummary(summaryPatientId);
@@ -109,6 +125,7 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
 
   // Overall statistics
   const stats = useMemo(() => {
+    const totalEstimates = estimates.reduce((sum, e) => sum + (e.totalAmount || 0), 0);
     const totalBilled = bills.reduce((sum, b) => sum + (b.totalAmount || 0), 0);
     const totalInsuranceApproved = bills.reduce(
       (sum, b) => sum + (b.isInsured ? (b.finalApprovedAmount || 0) : 0),
@@ -118,20 +135,31 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
     const totalNetPayable = bills.reduce((sum, b) => sum + (b.patientNetPayable || 0), 0);
     const totalOutstanding = Math.max(0, totalNetPayable - totalReceipts);
 
-    const settledCount = bills.filter(b => b.status === 'Settled').length;
-    const partialCount = bills.filter(b => b.status === 'Partially Paid').length;
-    const pendingCount = bills.filter(b => b.status === 'Generated' || b.status === 'Draft').length;
-
     return {
+      totalEstimates,
       totalBilled,
       totalInsuranceApproved,
       totalReceipts,
       totalOutstanding,
-      settledCount,
-      partialCount,
-      pendingCount,
+      activeEstimatesCount: estimates.filter(e => e.status === 'Active').length,
+      settledCount: bills.filter(b => b.status === 'Settled').length,
+      partialCount: bills.filter(b => b.status === 'Partially Paid').length,
     };
-  }, [bills, receipts]);
+  }, [estimates, bills, receipts]);
+
+  // Filtered estimates
+  const filteredEstimates = useMemo(() => {
+    return estimates.filter(e => {
+      const matchesSearch =
+        e.estimateNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        e.patientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (e.uhid && e.uhid.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (e.surgeryDetails && e.surgeryDetails.toLowerCase().includes(searchTerm.toLowerCase()));
+
+      const matchesStatus = statusFilter === 'all' || e.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [estimates, searchTerm, statusFilter]);
 
   // Filtered bills
   const filteredBills = useMemo(() => {
@@ -161,10 +189,31 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
         (r.referenceNumber && r.referenceNumber.toLowerCase().includes(searchTerm.toLowerCase()));
 
       const matchesMode = modeFilter === 'all' || r.paymentMode === modeFilter;
-
       return matchesSearch && matchesMode;
     });
   }, [receipts, searchTerm, modeFilter]);
+
+  // Convert estimate to bill
+  const handleConvertToBill = async (estimateId: string) => {
+    const est = estimates.find(e => e.id === estimateId);
+    if (!est) return;
+
+    if (confirm(`Convert Estimate "${est.estimateNumber}" for ${est.patientName} into an actual Hospital Bill?`)) {
+      const newBill = await ApiClient.convertEstimateToBill(estimateId, currentUser);
+      await loadBillingData();
+      setSelectedEstimateForPrint(null);
+      setActiveTab('bills');
+      setSelectedBillForPrint(newBill);
+    }
+  };
+
+  // Handle Delete Estimate
+  const handleDeleteEstimate = async (estimateId: string) => {
+    if (confirm('Are you sure you want to delete this estimate?')) {
+      await ApiClient.deleteEstimate(estimateId, currentUser);
+      await loadBillingData();
+    }
+  };
 
   // Handle Delete Bill
   const handleDeleteBill = async (billId: string) => {
@@ -192,16 +241,29 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
               <ReceiptIcon className="w-5 h-5" />
             </div>
             <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-              Hospital Billing & Receipts
+              Hospital Billing & Financials
             </h1>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Manage surgical invoices, insurance final approvals, co-payments, partial receipts, and patient statements.
+            Treatment cost estimates, rate-card based invoices, insurance cashless settlements, and payment vouchers.
           </p>
         </div>
 
         {/* Quick Action Buttons */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Generate Estimate */}
+          <button
+            onClick={() => {
+              setEditingEstimate(null);
+              setIsEstimateModalOpen(true);
+            }}
+            className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+          >
+            <Calculator className="w-4 h-4" />
+            <span>Generate Estimate</span>
+          </button>
+
+          {/* User Request #1: Replace "Generate New Hospital Bill" with "Generate New Bill" */}
           <button
             onClick={() => {
               setEditingBill(null);
@@ -212,6 +274,8 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
             <Plus className="w-4 h-4" />
             <span>Generate New Bill</span>
           </button>
+
+          {/* Record Payment */}
           <button
             onClick={() => {
               setPreselectedBillId(bills[0]?.id || '');
@@ -227,6 +291,18 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
 
       {/* KPI Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
+        <div className="bg-white p-3.5 rounded-xl border border-amber-200 bg-amber-50/20 shadow-xs">
+          <span className="text-[11px] font-bold text-amber-800 uppercase tracking-wider block">
+            Cost Estimates
+          </span>
+          <div className="text-xl font-black text-amber-950 font-mono mt-0.5">
+            ₹{stats.totalEstimates.toLocaleString('en-IN')}
+          </div>
+          <div className="text-[10px] text-amber-700 mt-1 flex items-center gap-1">
+            <span className="font-semibold">{stats.activeEstimatesCount}</span> active treatment estimates
+          </div>
+        </div>
+
         <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
           <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
             Total Billed
@@ -234,8 +310,8 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
           <div className="text-xl font-black text-slate-900 font-mono mt-0.5">
             ₹{stats.totalBilled.toLocaleString('en-IN')}
           </div>
-          <div className="text-[10px] text-slate-500 mt-1 flex items-center gap-1">
-            <span className="font-semibold text-slate-700">{bills.length}</span> invoices issued
+          <div className="text-[10px] text-slate-500 mt-1">
+            <span className="font-semibold text-slate-700">{bills.length}</span> bills issued
           </div>
         </div>
 
@@ -248,7 +324,7 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
           </div>
           <div className="text-[10px] text-blue-600 mt-1 flex items-center gap-1">
             <ShieldCheck className="w-3 h-3" />
-            Cashless TPA settled
+            TPA settled cashless
           </div>
         </div>
 
@@ -264,24 +340,30 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
             <span className="font-semibold">{receipts.length}</span> receipts in parts
           </div>
         </div>
-
-        <div className="bg-white p-3.5 rounded-xl border border-amber-200 bg-amber-50/30 shadow-xs">
-          <span className="text-[11px] font-bold text-amber-800 uppercase tracking-wider block">
-            Net Outstanding Due
-          </span>
-          <div className="text-xl font-black text-amber-900 font-mono mt-0.5">
-            ₹{stats.totalOutstanding.toLocaleString('en-IN')}
-          </div>
-          <div className="text-[10px] text-amber-700 mt-1">
-            {stats.partialCount} partial, {stats.pendingCount} unpaid bills
-          </div>
-        </div>
       </div>
 
-      {/* Module Navigation Tabs */}
+      {/* Module Navigation Tabs - User Request #4: Estimates tab BEFORE Bills (renamed to Bills) */}
       <div className="flex border-b border-slate-200 bg-white rounded-t-xl px-2 pt-2 shadow-xs">
         <button
-          onClick={() => setActiveTab('bills')}
+          onClick={() => {
+            setActiveTab('estimates');
+            setStatusFilter('all');
+          }}
+          className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition-all cursor-pointer ${
+            activeTab === 'estimates'
+              ? 'border-amber-600 text-amber-700'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Calculator className="w-4 h-4" />
+          <span>Estimates ({estimates.length})</span>
+        </button>
+
+        <button
+          onClick={() => {
+            setActiveTab('bills');
+            setStatusFilter('all');
+          }}
           className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition-all cursor-pointer ${
             activeTab === 'bills'
               ? 'border-blue-600 text-blue-600'
@@ -289,7 +371,7 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
           }`}
         >
           <FileText className="w-4 h-4" />
-          <span>Hospital Bills ({bills.length})</span>
+          <span>Bills ({bills.length})</span>
         </button>
 
         <button
@@ -317,7 +399,185 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
         </button>
       </div>
 
-      {/* TAB 1: BILLS */}
+      {/* TAB 1: ESTIMATES */}
+      {activeTab === 'estimates' && (
+        <div className="space-y-4">
+          {/* Search & Filters */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
+            <div className="relative w-full sm:w-80">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search estimate no, patient name, UHID..."
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-amber-500 focus:bg-white"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <span className="text-[11px] font-semibold text-slate-500 shrink-0">Status:</span>
+              <select
+                value={statusFilter}
+                onChange={e => setStatusFilter(e.target.value)}
+                className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none text-slate-700"
+              >
+                <option value="all">All Estimates</option>
+                <option value="Active">Active Estimates</option>
+                <option value="Converted to Bill">Converted to Bill</option>
+                <option value="Expired">Expired</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Estimates List Table */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="bg-slate-50 text-slate-600 border-b border-slate-200 font-semibold">
+                    <th className="py-3 px-3.5">Estimate No & Date</th>
+                    <th className="py-3 px-3.5">Patient Details</th>
+                    <th className="py-3 px-3.5">Proposed Surgery</th>
+                    <th className="py-3 px-3 text-right">Total Estimate</th>
+                    <th className="py-3 px-3 text-right">Insurance Expected</th>
+                    <th className="py-3 px-3 text-right">Patient Est. Share</th>
+                    <th className="py-3 px-3 text-center">Status</th>
+                    <th className="py-3 px-3.5 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredEstimates.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="text-center py-8 text-slate-400 italic">
+                        No estimates found. Click "Generate Estimate" to create one.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredEstimates.map(est => (
+                      <tr key={est.id} className="hover:bg-amber-50/30 transition-colors">
+                        <td className="py-3 px-3.5">
+                          <div className="font-mono font-bold text-slate-900">{est.estimateNumber}</div>
+                          <div className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
+                            <Calendar className="w-3 h-3" />
+                            {new Date(est.estimateDate).toLocaleDateString('en-IN', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric',
+                            })}
+                          </div>
+                        </td>
+
+                        <td className="py-3 px-3.5">
+                          <div className="font-semibold text-slate-900">{est.patientName}</div>
+                          <div className="text-[10px] text-slate-500 font-mono">
+                            UHID: {est.uhid || est.patientId}
+                          </div>
+                          {est.isInsured && (
+                            <span className="inline-block mt-0.5 text-[9px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.2 rounded">
+                              {est.insuranceCompany || 'TPA'}
+                            </span>
+                          )}
+                        </td>
+
+                        <td className="py-3 px-3.5 max-w-[220px]">
+                          <div className="text-slate-800 font-medium truncate" title={est.surgeryDetails}>
+                            {est.surgeryDetails || 'Eye Care Treatment'}
+                          </div>
+                          <div className="text-[10px] text-slate-500">
+                            {est.items.length} particulars
+                          </div>
+                        </td>
+
+                        <td className="py-3 px-3 text-right font-mono font-bold text-slate-900">
+                          ₹{est.totalAmount.toLocaleString('en-IN')}
+                        </td>
+
+                        <td className="py-3 px-3 text-right font-mono text-blue-700">
+                          {est.isInsured ? (
+                            <span>₹{(est.estimatedInsuranceCoverage || est.preAuthAmount || 0).toLocaleString('en-IN')}</span>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
+
+                        <td className="py-3 px-3 text-right font-mono font-bold text-amber-900">
+                          ₹{est.patientEstimatedNetPayable.toLocaleString('en-IN')}
+                        </td>
+
+                        <td className="py-3 px-3 text-center">
+                          <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            est.status === 'Converted to Bill'
+                              ? 'bg-blue-100 text-blue-800'
+                              : 'bg-emerald-100 text-emerald-800'
+                          }`}>
+                            {est.status}
+                          </span>
+                          {est.convertedBillNumber && (
+                            <div className="text-[9px] font-mono text-blue-600 mt-0.5">
+                              {est.convertedBillNumber}
+                            </div>
+                          )}
+                        </td>
+
+                        <td className="py-3 px-3.5 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {/* Convert to Bill Button */}
+                            {est.status === 'Active' && (
+                              <button
+                                onClick={() => handleConvertToBill(est.id)}
+                                title="Convert Estimate to Bill"
+                                className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[11px] font-semibold flex items-center gap-1 cursor-pointer transition-colors shadow-xs"
+                              >
+                                <ArrowRight className="w-3 h-3" />
+                                <span>To Bill</span>
+                              </button>
+                            )}
+
+                            {/* Print Estimate */}
+                            <button
+                              onClick={() => setSelectedEstimateForPrint(est)}
+                              title="Print Cost Estimate"
+                              className="p-1.5 text-amber-700 hover:text-white hover:bg-amber-600 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Edit Estimate */}
+                            {est.status === 'Active' && (
+                              <button
+                                onClick={() => {
+                                  setEditingEstimate(est);
+                                  setIsEstimateModalOpen(true);
+                                }}
+                                title="Edit Estimate"
+                                className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+
+                            {/* Delete */}
+                            <button
+                              onClick={() => handleDeleteEstimate(est.id)}
+                              title="Delete Estimate"
+                              className="p-1.5 text-rose-500 hover:text-white hover:bg-rose-600 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: BILLS (Renamed from Hospital Bills) */}
       {activeTab === 'bills' && (
         <div className="space-y-4">
           {/* Search & Filters */}
@@ -371,144 +631,140 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
                   {filteredBills.length === 0 ? (
                     <tr>
                       <td colSpan={10} className="text-center py-8 text-slate-400 italic">
-                        No bills found matching your criteria.
+                        No bills found matching your criteria. Click "Generate New Bill" to create one.
                       </td>
                     </tr>
                   ) : (
-                    filteredBills.map(bill => {
-                      const matchedPatient = patients.find(p => p.id === bill.patientId);
+                    filteredBills.map(bill => (
+                      <tr key={bill.id} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="py-3 px-3.5">
+                          <div className="font-mono font-bold text-slate-900">{bill.billNumber}</div>
+                          <div className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
+                            <Calendar className="w-3 h-3" />
+                            {new Date(bill.billDate).toLocaleDateString('en-IN', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric',
+                            })}
+                          </div>
+                        </td>
 
-                      return (
-                        <tr key={bill.id} className="hover:bg-slate-50/70 transition-colors">
-                          <td className="py-3 px-3.5">
-                            <div className="font-mono font-bold text-slate-900">{bill.billNumber}</div>
-                            <div className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
-                              <Calendar className="w-3 h-3" />
-                              {new Date(bill.billDate).toLocaleDateString('en-IN', {
-                                day: '2-digit',
-                                month: 'short',
-                                year: 'numeric',
-                              })}
-                            </div>
-                          </td>
-
-                          <td className="py-3 px-3.5">
-                            <div className="font-semibold text-slate-900">{bill.patientName}</div>
-                            <div className="text-[10px] text-slate-500 font-mono">
-                              UHID: {bill.uhid || bill.patientId}
-                            </div>
-                            {bill.isInsured && (
-                              <span className="inline-block mt-0.5 text-[9px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.2 rounded">
-                                {bill.insuranceCompany || 'TPA Insured'}
-                              </span>
-                            )}
-                          </td>
-
-                          <td className="py-3 px-3.5 max-w-[200px]">
-                            <div className="text-slate-800 font-medium truncate" title={bill.surgeryDetails}>
-                              {bill.surgeryDetails || 'Eye Care Services'}
-                            </div>
-                            <div className="text-[10px] text-slate-500">
-                              {bill.items.length} itemized particulars
-                            </div>
-                          </td>
-
-                          <td className="py-3 px-3 text-right font-mono font-medium text-slate-900">
-                            ₹{bill.totalAmount.toLocaleString('en-IN')}
-                          </td>
-
-                          <td className="py-3 px-3 text-right font-mono text-blue-700">
-                            {bill.isInsured ? (
-                              <span className="font-bold">
-                                ₹{(bill.finalApprovedAmount || 0).toLocaleString('en-IN')}
-                              </span>
-                            ) : (
-                              <span className="text-slate-400">—</span>
-                            )}
-                          </td>
-
-                          <td className="py-3 px-3 text-right font-mono font-bold text-slate-900">
-                            ₹{bill.patientNetPayable.toLocaleString('en-IN')}
-                          </td>
-
-                          <td className="py-3 px-3 text-right font-mono font-bold text-emerald-700">
-                            ₹{bill.paidAmount.toLocaleString('en-IN')}
-                          </td>
-
-                          <td className="py-3 px-3 text-right font-mono">
-                            <span className={`font-bold ${
-                              bill.balanceDue === 0
-                                ? 'text-emerald-700'
-                                : bill.balanceDue > 0
-                                ? 'text-rose-700'
-                                : 'text-amber-700'
-                            }`}>
-                              ₹{Math.abs(bill.balanceDue).toLocaleString('en-IN')}
+                        <td className="py-3 px-3.5">
+                          <div className="font-semibold text-slate-900">{bill.patientName}</div>
+                          <div className="text-[10px] text-slate-500 font-mono">
+                            UHID: {bill.uhid || bill.patientId}
+                          </div>
+                          {bill.isInsured && (
+                            <span className="inline-block mt-0.5 text-[9px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.2 rounded">
+                              {bill.insuranceCompany || 'TPA Insured'}
                             </span>
-                          </td>
+                          )}
+                        </td>
 
-                          <td className="py-3 px-3 text-center">
-                            <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              bill.status === 'Settled'
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : bill.status === 'Partially Paid'
-                                ? 'bg-amber-100 text-amber-800'
-                                : bill.status === 'Refundable'
-                                ? 'bg-purple-100 text-purple-800'
-                                : 'bg-slate-100 text-slate-700'
-                            }`}>
-                              {bill.status}
+                        <td className="py-3 px-3.5 max-w-[200px]">
+                          <div className="text-slate-800 font-medium truncate" title={bill.surgeryDetails}>
+                            {bill.surgeryDetails || 'Eye Care Services'}
+                          </div>
+                          <div className="text-[10px] text-slate-500">
+                            {bill.items.length} itemized particulars
+                          </div>
+                        </td>
+
+                        <td className="py-3 px-3 text-right font-mono font-medium text-slate-900">
+                          ₹{bill.totalAmount.toLocaleString('en-IN')}
+                        </td>
+
+                        <td className="py-3 px-3 text-right font-mono text-blue-700">
+                          {bill.isInsured ? (
+                            <span className="font-bold">
+                              ₹{(bill.finalApprovedAmount || 0).toLocaleString('en-IN')}
                             </span>
-                          </td>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
 
-                          <td className="py-3 px-3.5 text-right">
-                            <div className="flex items-center justify-end gap-1.5">
-                              {/* Print Bill */}
-                              <button
-                                onClick={() => setSelectedBillForPrint(bill)}
-                                title="Print Bill Invoice"
-                                className="p-1.5 text-blue-600 hover:text-white hover:bg-blue-600 rounded-lg transition-colors cursor-pointer"
-                              >
-                                <Printer className="w-3.5 h-3.5" />
-                              </button>
+                        <td className="py-3 px-3 text-right font-mono font-bold text-slate-900">
+                          ₹{bill.patientNetPayable.toLocaleString('en-IN')}
+                        </td>
 
-                              {/* Record Receipt against this bill */}
-                              <button
-                                onClick={() => {
-                                  setPreselectedBillId(bill.id);
-                                  setIsReceiptModalOpen(true);
-                                }}
-                                title="Record Payment Receipt"
-                                className="p-1.5 text-emerald-600 hover:text-white hover:bg-emerald-600 rounded-lg transition-colors cursor-pointer"
-                              >
-                                <CreditCard className="w-3.5 h-3.5" />
-                              </button>
+                        <td className="py-3 px-3 text-right font-mono font-bold text-emerald-700">
+                          ₹{bill.paidAmount.toLocaleString('en-IN')}
+                        </td>
 
-                              {/* Edit Bill */}
-                              <button
-                                onClick={() => {
-                                  setEditingBill(bill);
-                                  setIsBillModalOpen(true);
-                                }}
-                                title="Edit Bill Details"
-                                className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
-                              >
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
+                        <td className="py-3 px-3 text-right font-mono">
+                          <span className={`font-bold ${
+                            bill.balanceDue === 0
+                              ? 'text-emerald-700'
+                              : bill.balanceDue > 0
+                              ? 'text-rose-700'
+                              : 'text-amber-700'
+                          }`}>
+                            ₹{Math.abs(bill.balanceDue).toLocaleString('en-IN')}
+                          </span>
+                        </td>
 
-                              {/* Delete */}
-                              <button
-                                onClick={() => handleDeleteBill(bill.id)}
-                                title="Delete Bill"
-                                className="p-1.5 text-rose-500 hover:text-white hover:bg-rose-600 rounded-lg transition-colors cursor-pointer"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
+                        <td className="py-3 px-3 text-center">
+                          <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            bill.status === 'Settled'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : bill.status === 'Partially Paid'
+                              ? 'bg-amber-100 text-amber-800'
+                              : bill.status === 'Refundable'
+                              ? 'bg-purple-100 text-purple-800'
+                              : 'bg-slate-100 text-slate-700'
+                          }`}>
+                            {bill.status}
+                          </span>
+                        </td>
+
+                        <td className="py-3 px-3.5 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {/* Print Bill */}
+                            <button
+                              onClick={() => setSelectedBillForPrint(bill)}
+                              title="Print Bill Invoice"
+                              className="p-1.5 text-blue-600 hover:text-white hover:bg-blue-600 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Record Receipt against this bill */}
+                            <button
+                              onClick={() => {
+                                setPreselectedBillId(bill.id);
+                                setIsReceiptModalOpen(true);
+                              }}
+                              title="Record Payment Receipt"
+                              className="p-1.5 text-emerald-600 hover:text-white hover:bg-emerald-600 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <CreditCard className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Edit Bill */}
+                            <button
+                              onClick={() => {
+                                setEditingBill(bill);
+                                setIsBillModalOpen(true);
+                              }}
+                              title="Edit Bill Details"
+                              className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Delete */}
+                            <button
+                              onClick={() => handleDeleteBill(bill.id)}
+                              title="Delete Bill"
+                              className="p-1.5 text-rose-500 hover:text-white hover:bg-rose-600 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
                   )}
                 </tbody>
               </table>
@@ -517,7 +773,7 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
         </div>
       )}
 
-      {/* TAB 2: RECEIPTS */}
+      {/* TAB 3: RECEIPTS */}
       {activeTab === 'receipts' && (
         <div className="space-y-4">
           {/* Search & Mode Filters */}
@@ -661,7 +917,7 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
         </div>
       )}
 
-      {/* TAB 3: PATIENT SUMMARY & STATEMENTS */}
+      {/* TAB 4: PATIENT SUMMARY & STATEMENTS */}
       {activeTab === 'summary' && (
         <div className="space-y-4">
           {/* Patient Selection Bar */}
@@ -772,90 +1028,37 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
                   <div className="text-[10px] text-emerald-600">{patientSummaryData.receipts.length} parts collected</div>
                 </div>
               </div>
-
-              {/* Bills & Receipts Subtables */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Bills Table */}
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-                  <div className="font-bold text-xs uppercase text-slate-800 tracking-wider mb-2 flex items-center justify-between">
-                    <span>Bills Issued ({patientSummaryData.bills.length})</span>
-                    <button
-                      onClick={() => {
-                        setEditingBill(null);
-                        setIsBillModalOpen(true);
-                      }}
-                      className="text-blue-600 hover:text-blue-700 text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
-                    >
-                      <Plus className="w-3 h-3" /> New Bill
-                    </button>
-                  </div>
-                  <div className="space-y-2">
-                    {patientSummaryData.bills.length === 0 ? (
-                      <p className="text-xs text-slate-400 italic py-2">No bills generated for this patient.</p>
-                    ) : (
-                      patientSummaryData.bills.map(b => (
-                        <div key={b.id} className="p-2.5 rounded-lg border border-slate-100 bg-slate-50/60 text-xs flex items-center justify-between">
-                          <div>
-                            <span className="font-mono font-bold text-slate-900">{b.billNumber}</span>
-                            <span className="text-slate-500 text-[10px] block">{b.billDate} • {b.surgeryDetails || 'Eye Care'}</span>
-                          </div>
-                          <div className="text-right">
-                            <div className="font-mono font-bold text-slate-900">₹{b.totalAmount.toLocaleString('en-IN')}</div>
-                            <span className={`inline-block text-[9px] px-1.5 py-0.2 rounded font-bold ${
-                              b.status === 'Settled' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                            }`}>{b.status}</span>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                {/* Receipts Table */}
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-                  <div className="font-bold text-xs uppercase text-slate-800 tracking-wider mb-2 flex items-center justify-between">
-                    <span>Receipts Collected ({patientSummaryData.receipts.length})</span>
-                    <button
-                      onClick={() => {
-                        setPreselectedBillId(patientSummaryData.bills[0]?.id || '');
-                        setIsReceiptModalOpen(true);
-                      }}
-                      className="text-emerald-600 hover:text-emerald-700 text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
-                    >
-                      <Plus className="w-3 h-3" /> Add Receipt
-                    </button>
-                  </div>
-                  <div className="space-y-2">
-                    {patientSummaryData.receipts.length === 0 ? (
-                      <p className="text-xs text-slate-400 italic py-2">No receipts recorded yet for this patient.</p>
-                    ) : (
-                      patientSummaryData.receipts.map(r => (
-                        <div key={r.id} className="p-2.5 rounded-lg border border-slate-100 bg-slate-50/60 text-xs flex items-center justify-between">
-                          <div>
-                            <span className="font-mono font-bold text-slate-900">{r.receiptNumber}</span>
-                            <span className="text-slate-500 text-[10px] block">{r.paymentDate} • {r.paymentMode}</span>
-                          </div>
-                          <div className="text-right font-mono font-bold text-emerald-700 text-sm">
-                            ₹{r.amount.toLocaleString('en-IN')}
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              </div>
             </div>
           )}
         </div>
       )}
 
-      {/* CREATE / EDIT BILL MODAL */}
-      {isBillModalOpen && (
-        <BillEditModal
+      {/* CREATE / EDIT ESTIMATE MODAL */}
+      {isEstimateModalOpen && (
+        <InvoiceEditorModal
+          mode="estimate"
           currentUser={currentUser}
-          bill={editingBill}
+          existingItem={editingEstimate}
           patients={patients}
           counsellingRecords={counsellingRecords}
+          consumablesRateCard={consumablesRateCard}
+          onClose={() => setIsEstimateModalOpen(false)}
+          onSaved={async () => {
+            setIsEstimateModalOpen(false);
+            await loadBillingData();
+          }}
+        />
+      )}
+
+      {/* CREATE / EDIT BILL MODAL (User Request #1: Replace "Generate New Hospital Bill" with "Generate New Bill") */}
+      {isBillModalOpen && (
+        <InvoiceEditorModal
+          mode="bill"
+          currentUser={currentUser}
+          existingItem={editingBill}
+          patients={patients}
+          counsellingRecords={counsellingRecords}
+          consumablesRateCard={consumablesRateCard}
           onClose={() => setIsBillModalOpen(false)}
           onSaved={async () => {
             setIsBillModalOpen(false);
@@ -879,6 +1082,15 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
       )}
 
       {/* PRINT MODALS */}
+      {selectedEstimateForPrint && (
+        <EstimatePrintModal
+          estimate={selectedEstimateForPrint}
+          patient={patients.find(p => p.id === selectedEstimateForPrint.patientId)}
+          onClose={() => setSelectedEstimateForPrint(null)}
+          onConvertToBill={handleConvertToBill}
+        />
+      )}
+
       {selectedBillForPrint && (
         <BillPrintModal
           bill={selectedBillForPrint}
@@ -907,56 +1119,72 @@ export const BillingModule: React.FC<BillingModuleProps> = ({
 };
 
 /**
- * Bill Create / Edit Submodal
+ * Universal Unified Invoice Editor Modal for both Bills and Estimates
+ * Supports:
+ * - Rate Card auto-population for Consumables
+ * - Optional Description field after selecting category and subcategories
+ * - Insurance pre-auth and final approved amount
  */
-interface BillEditModalProps {
+interface InvoiceEditorModalProps {
+  mode: 'bill' | 'estimate';
   currentUser: User;
-  bill: Bill | null;
+  existingItem: Bill | Estimate | null;
   patients: Patient[];
   counsellingRecords: CounsellingRecord[];
+  consumablesRateCard: ConsumableSetting[];
   onClose: () => void;
   onSaved: () => void;
 }
 
-const BillEditModal: React.FC<BillEditModalProps> = ({
+const InvoiceEditorModal: React.FC<InvoiceEditorModalProps> = ({
+  mode,
   currentUser,
-  bill,
+  existingItem,
   patients,
   counsellingRecords,
+  consumablesRateCard,
   onClose,
   onSaved,
 }) => {
+  const isBill = mode === 'bill';
+  const existingBill = isBill ? (existingItem as Bill) : null;
+  const existingEstimate = !isBill ? (existingItem as Estimate) : null;
+
   const [selectedPatientId, setSelectedPatientId] = useState<string>(
-    bill?.patientId || patients[0]?.id || ''
+    existingItem?.patientId || patients[0]?.id || ''
   );
-  const [billDate, setBillDate] = useState<string>(
-    bill?.billDate || new Date().toISOString().split('T')[0]
+  const [docDate, setDocDate] = useState<string>(
+    isBill
+      ? (existingBill?.billDate || new Date().toISOString().split('T')[0])
+      : (existingEstimate?.estimateDate || new Date().toISOString().split('T')[0])
   );
-  const [surgeryDate, setSurgeryDate] = useState<string>(bill?.surgeryDate || '');
-  const [surgeryDetails, setSurgeryDetails] = useState<string>(bill?.surgeryDetails || '');
+  const [surgeryDate, setSurgeryDate] = useState<string>(existingItem?.surgeryDate || '');
+  const [surgeryDetails, setSurgeryDetails] = useState<string>(existingItem?.surgeryDetails || '');
   const [doctorName, setDoctorName] = useState<string>(
-    bill?.doctorName || 'Dr.A.R.Karthik, DO, DNB'
+    existingItem?.doctorName || 'Dr.A.R.Karthik, DO, DNB'
   );
-  const [isInsured, setIsInsured] = useState<boolean>(bill?.isInsured || false);
-  const [insuranceCompany, setInsuranceCompany] = useState<string>(bill?.insuranceCompany || '');
-  const [tpaName, setTpaName] = useState<string>(bill?.tpaName || '');
-  const [policyNumber, setPolicyNumber] = useState<string>(bill?.policyNumber || '');
-  const [claimNumber, setClaimNumber] = useState<string>(bill?.claimNumber || '');
-  const [preAuthAmount, setPreAuthAmount] = useState<number>(bill?.preAuthAmount || 0);
+  const [isInsured, setIsInsured] = useState<boolean>(existingItem?.isInsured || false);
+  const [insuranceCompany, setInsuranceCompany] = useState<string>(existingItem?.insuranceCompany || '');
+  const [tpaName, setTpaName] = useState<string>(existingItem?.tpaName || '');
+  const [policyNumber, setPolicyNumber] = useState<string>(existingItem?.policyNumber || '');
+  const [claimNumber, setClaimNumber] = useState<string>(existingBill?.claimNumber || '');
+  const [preAuthAmount, setPreAuthAmount] = useState<number>(existingItem?.preAuthAmount || 0);
   const [finalApprovedAmount, setFinalApprovedAmount] = useState<number>(
-    bill?.finalApprovedAmount || 0
+    isBill
+      ? (existingBill?.finalApprovedAmount || 0)
+      : (existingEstimate?.estimatedInsuranceCoverage || 0)
   );
-  const [coPayPercent, setCoPayPercent] = useState<number>(bill?.coPayPercent || 0);
-  const [coPayAmount, setCoPayAmount] = useState<number>(bill?.coPayAmount || 0);
+  const [coPayPercent, setCoPayPercent] = useState<number>(existingItem?.coPayPercent || 0);
+  const [coPayAmount, setCoPayAmount] = useState<number>(existingItem?.coPayAmount || 0);
   const [nonMedicalDeductions, setNonMedicalDeductions] = useState<number>(
-    bill?.nonMedicalDeductions || 0
+    existingItem?.nonMedicalDeductions || 0
   );
-  const [discount, setDiscount] = useState<number>(bill?.discount || 0);
-  const [notes, setNotes] = useState<string>(bill?.notes || '');
+  const [discount, setDiscount] = useState<number>(existingItem?.discount || 0);
+  const [notes, setNotes] = useState<string>(existingItem?.notes || '');
 
   // Default Item Lines
   const [items, setItems] = useState<BillItem[]>(
-    bill?.items || [
+    existingItem?.items || [
       {
         id: 'item_1',
         description: 'Surgeon fee towards eye surgery',
@@ -969,9 +1197,10 @@ const BillEditModal: React.FC<BillEditModalProps> = ({
         id: 'item_2',
         description: 'Consumables - Foldable IOL & Viscoelastic pack',
         category: 'consumable',
+        consumableId: consumablesRateCard[0]?.id || 'cons_1',
         quantity: 1,
-        unitPrice: 15000,
-        amount: 15000,
+        unitPrice: consumablesRateCard[0]?.unitPrice || 12000,
+        amount: consumablesRateCard[0]?.unitPrice || 12000,
       },
       {
         id: 'item_3',
@@ -984,7 +1213,7 @@ const BillEditModal: React.FC<BillEditModalProps> = ({
     ]
   );
 
-  // Selected Patient
+  // Active Patient
   const activePatient = patients.find(p => p.id === selectedPatientId);
 
   // Check matching counselling plan
@@ -1002,7 +1231,13 @@ const BillEditModal: React.FC<BillEditModalProps> = ({
       setDoctorName(matchingCounselling.counsellorName);
     }
 
-    // Set itemized lines with the exact required format
+    // Match consumable from rate card
+    const matchedConsumable = consumablesRateCard.find(
+      c => c.name.toLowerCase().includes(matchingCounselling.plannedConsumable.toLowerCase()) ||
+           matchingCounselling.plannedConsumable.toLowerCase().includes(c.name.toLowerCase())
+    );
+    const consPrice = matchedConsumable?.unitPrice || 18000;
+
     const sDate = new Date(matchingCounselling.tentativeSurgeryDate).toLocaleDateString('en-IN', {
       day: '2-digit',
       month: '2-digit',
@@ -1022,9 +1257,10 @@ const BillEditModal: React.FC<BillEditModalProps> = ({
         id: `item_${Date.now()}_2`,
         description: `Consumables - ${matchingCounselling.plannedConsumable}`,
         category: 'consumable',
+        consumableId: matchedConsumable?.id,
         quantity: 1,
-        unitPrice: 16000,
-        amount: 16000,
+        unitPrice: consPrice,
+        amount: consPrice,
       },
       {
         id: `item_${Date.now()}_3`,
@@ -1046,27 +1282,52 @@ const BillEditModal: React.FC<BillEditModalProps> = ({
 
   // Add Item
   const handleAddItem = () => {
+    const firstCons = consumablesRateCard[0];
     setItems([
       ...items,
       {
         id: `item_${Date.now()}`,
-        description: 'Additional surgical consumable / service',
+        description: '',
         category: 'consumable',
+        consumableId: firstCons?.id,
         quantity: 1,
-        unitPrice: 1000,
-        amount: 1000,
+        unitPrice: firstCons?.unitPrice || 2500,
+        amount: firstCons?.unitPrice || 2500,
       },
     ]);
   };
 
-  // Update Item
+  // Update Item & handle rate card auto-population
   const handleUpdateItem = (id: string, updates: Partial<BillItem>) => {
     setItems(
       items.map(i => {
         if (i.id === id) {
           const updated = { ...i, ...updates };
-          if (updates.quantity !== undefined || updates.unitPrice !== undefined) {
-            updated.amount = (Number(updated.quantity) || 0) * (Number(updated.unitPrice) || 0);
+
+          // If consumableId was changed, auto-populate unitPrice from rate card!
+          if (updates.consumableId !== undefined) {
+            const matched = consumablesRateCard.find(c => c.id === updates.consumableId);
+            if (matched && matched.unitPrice !== undefined) {
+              updated.unitPrice = matched.unitPrice;
+              // If description is empty, auto-populate item name
+              if (!updated.description || updated.description.trim() === '') {
+                updated.description = matched.name;
+              }
+            }
+          }
+
+          // If category changed to consumable, select first rate card consumable
+          if (updates.category === 'consumable' && !updated.consumableId) {
+            const first = consumablesRateCard[0];
+            if (first) {
+              updated.consumableId = first.id;
+              updated.unitPrice = first.unitPrice || 5000;
+              if (!updated.description) updated.description = first.name;
+            }
+          }
+
+          if (updates.quantity !== undefined || updates.unitPrice !== undefined || updates.consumableId !== undefined) {
+            updated.amount = (Number(updated.quantity) || 1) * (Number(updated.unitPrice) || 0);
           }
           return updated;
         }
@@ -1078,7 +1339,7 @@ const BillEditModal: React.FC<BillEditModalProps> = ({
   // Remove Item
   const handleRemoveItem = (id: string) => {
     if (items.length <= 1) {
-      alert('A bill must contain at least one item line.');
+      alert('Must contain at least one item line.');
       return;
     }
     setItems(items.filter(i => i.id !== id));
@@ -1089,40 +1350,94 @@ const BillEditModal: React.FC<BillEditModalProps> = ({
     e.preventDefault();
     if (!activePatient) return;
 
-    await ApiClient.saveBill(
-      {
-        id: bill?.id,
-        billNumber: bill?.billNumber || '',
-        patientId: activePatient.id,
-        uhid: activePatient.uhid,
-        patientName: activePatient.name,
-        billDate,
-        surgeryDate,
-        surgeryDetails,
-        doctorName,
-        items,
-        subtotal,
-        discount,
-        tax: 0,
-        totalAmount: grossTotal,
-        isInsured,
-        insuranceCompany,
-        tpaName,
-        policyNumber,
-        claimNumber,
-        preAuthAmount,
-        finalApprovedAmount,
-        coPayPercent,
-        coPayAmount,
-        nonMedicalDeductions,
-        patientNetPayable,
-        paidAmount: bill?.paidAmount || 0,
-        balanceDue: patientNetPayable - (bill?.paidAmount || 0),
-        status: bill?.status || 'Generated',
-        notes,
-      },
-      currentUser
-    );
+    // Ensure all items have a description fallback if left optional
+    const preparedItems = items.map(item => {
+      let desc = item.description?.trim();
+      if (!desc) {
+        if (item.category === 'consumable' && item.consumableId) {
+          const matched = consumablesRateCard.find(c => c.id === item.consumableId);
+          desc = matched ? matched.name : 'Surgical Consumable';
+        } else if (item.category === 'surgeon_fee') {
+          desc = `Surgeon fee towards ${surgeryDetails || 'ophthalmic surgery'}`;
+        } else if (item.category === 'ot_charges') {
+          desc = 'Operation Theatre & Sterilization charges';
+        } else if (item.category === 'investigation') {
+          desc = 'Pre-operative Diagnostic investigations';
+        } else {
+          desc = `${item.category.replace('_', ' ').toUpperCase()} charges`;
+        }
+      }
+      return { ...item, description: desc };
+    });
+
+    if (isBill) {
+      await ApiClient.saveBill(
+        {
+          id: existingBill?.id,
+          billNumber: existingBill?.billNumber || '',
+          patientId: activePatient.id,
+          uhid: activePatient.uhid,
+          patientName: activePatient.name,
+          billDate: docDate,
+          surgeryDate,
+          surgeryDetails,
+          doctorName,
+          items: preparedItems,
+          subtotal,
+          discount,
+          tax: 0,
+          totalAmount: grossTotal,
+          isInsured,
+          insuranceCompany,
+          tpaName,
+          policyNumber,
+          claimNumber,
+          preAuthAmount,
+          finalApprovedAmount,
+          coPayPercent,
+          coPayAmount,
+          nonMedicalDeductions,
+          patientNetPayable,
+          paidAmount: existingBill?.paidAmount || 0,
+          balanceDue: patientNetPayable - (existingBill?.paidAmount || 0),
+          status: existingBill?.status || 'Generated',
+          notes,
+        },
+        currentUser
+      );
+    } else {
+      await ApiClient.saveEstimate(
+        {
+          id: existingEstimate?.id,
+          estimateNumber: existingEstimate?.estimateNumber || '',
+          patientId: activePatient.id,
+          uhid: activePatient.uhid,
+          patientName: activePatient.name,
+          estimateDate: docDate,
+          surgeryDate,
+          surgeryDetails,
+          doctorName,
+          items: preparedItems,
+          subtotal,
+          discount,
+          tax: 0,
+          totalAmount: grossTotal,
+          isInsured,
+          insuranceCompany,
+          tpaName,
+          policyNumber,
+          preAuthAmount,
+          estimatedInsuranceCoverage: finalApprovedAmount,
+          coPayPercent,
+          coPayAmount,
+          nonMedicalDeductions,
+          patientEstimatedNetPayable: patientNetPayable,
+          status: existingEstimate?.status || 'Active',
+          notes,
+        },
+        currentUser
+      );
+    }
 
     onSaved();
   };
@@ -1130,12 +1445,14 @@ const BillEditModal: React.FC<BillEditModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 overflow-y-auto">
       <div className="relative w-full max-w-4xl bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh] border border-slate-200">
-        {/* Header */}
+        {/* Header - User Request #1: "Generate New Bill" */}
         <div className="px-5 py-3.5 bg-slate-900 text-white flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
-            <FileText className="w-4 h-4 text-blue-400" />
+            {isBill ? <FileText className="w-4 h-4 text-blue-400" /> : <Calculator className="w-4 h-4 text-amber-400" />}
             <span className="font-bold text-sm">
-              {bill ? `Edit Hospital Bill (${bill.billNumber})` : 'Generate New Hospital Bill'}
+              {isBill
+                ? (existingBill ? `Edit Bill (${existingBill.billNumber})` : 'Generate New Bill')
+                : (existingEstimate ? `Edit Estimate (${existingEstimate.estimateNumber})` : 'Generate Treatment Estimate')}
             </span>
           </div>
           <button
@@ -1156,7 +1473,7 @@ const BillEditModal: React.FC<BillEditModalProps> = ({
               </label>
               <select
                 value={selectedPatientId}
-                disabled={Boolean(bill)}
+                disabled={Boolean(existingItem)}
                 onChange={e => {
                   setSelectedPatientId(e.target.value);
                   const p = patients.find(pat => pat.id === e.target.value);
@@ -1173,11 +1490,13 @@ const BillEditModal: React.FC<BillEditModalProps> = ({
             </div>
 
             <div>
-              <label className="text-[11px] font-bold text-slate-700 block mb-1">Bill Date</label>
+              <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                {isBill ? 'Bill Date' : 'Estimate Date'}
+              </label>
               <input
                 type="date"
-                value={billDate}
-                onChange={e => setBillDate(e.target.value)}
+                value={docDate}
+                onChange={e => setDocDate(e.target.value)}
                 className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs focus:outline-none focus:border-blue-500"
                 required
               />
@@ -1196,7 +1515,9 @@ const BillEditModal: React.FC<BillEditModalProps> = ({
 
             <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-slate-200">
               <div>
-                <label className="text-[11px] font-bold text-slate-700 block mb-1">Surgery Date</label>
+                <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                  {isBill ? 'Surgery Date' : 'Tentative Surgery Date'}
+                </label>
                 <input
                   type="date"
                   value={surgeryDate}
@@ -1237,7 +1558,7 @@ const BillEditModal: React.FC<BillEditModalProps> = ({
             )}
           </div>
 
-          {/* Insurance Approval Section */}
+          {/* Insurance Approval / Coverage Section */}
           <div className="p-3 bg-white rounded-xl border border-slate-200 space-y-3">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -1254,7 +1575,7 @@ const BillEditModal: React.FC<BillEditModalProps> = ({
 
               {isInsured && (
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800">
-                  TPA Enabled
+                  Cashless TPA Enabled
                 </span>
               )}
             </div>
@@ -1301,7 +1622,7 @@ const BillEditModal: React.FC<BillEditModalProps> = ({
 
                 <div className="bg-emerald-50/70 p-2 rounded border border-emerald-300">
                   <label className="text-[10px] uppercase font-extrabold text-emerald-900 block mb-1">
-                    Final Approved Amount (₹) <span className="text-red-500">*</span>
+                    {isBill ? 'Final Approved Amount (₹)' : 'Estimated Coverage (₹)'} <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="number"
@@ -1367,10 +1688,15 @@ const BillEditModal: React.FC<BillEditModalProps> = ({
             )}
           </div>
 
-          {/* Itemized Particulars Table */}
+          {/* Itemized Particulars with Rate Card Auto-Population & Optional Description (User Requests #2 & #3) */}
           <div className="border border-slate-200 rounded-xl overflow-hidden">
             <div className="bg-slate-100 p-2.5 font-bold text-slate-800 flex items-center justify-between">
-              <span>Itemized Particulars (Surgeon fee, Consumables, OT, etc.)</span>
+              <div className="flex items-center gap-2">
+                <span>Itemized Particulars (Rate Card Enabled)</span>
+                <span className="text-[10px] text-slate-500 font-normal">
+                  • Selecting Consumable auto-populates price from rate card. Description is optional.
+                </span>
+              </div>
               <button
                 type="button"
                 onClick={handleAddItem}
@@ -1384,73 +1710,147 @@ const BillEditModal: React.FC<BillEditModalProps> = ({
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
                   <th className="p-2 w-8 text-center">#</th>
-                  <th className="p-2">Description</th>
-                  <th className="p-2 w-32">Category</th>
+                  <th className="p-2 w-36">Category</th>
+                  <th className="p-2 w-48">Rate Card Item / Subcategory</th>
+                  <th className="p-2">Description (Optional)</th>
                   <th className="p-2 w-16 text-center">Qty</th>
                   <th className="p-2 w-24 text-right">Rate (₹)</th>
                   <th className="p-2 w-28 text-right">Amount (₹)</th>
-                  <th className="p-2 w-10 text-center"></th>
+                  <th className="p-2 w-8 text-center"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {items.map((item, index) => (
-                  <tr key={item.id} className="hover:bg-slate-50/50">
-                    <td className="p-2 text-center text-slate-400">{index + 1}</td>
-                    <td className="p-2">
-                      <input
-                        type="text"
-                        value={item.description}
-                        onChange={e => handleUpdateItem(item.id, { description: e.target.value })}
-                        className="w-full border border-slate-300 rounded p-1 text-xs"
-                        required
-                      />
-                    </td>
-                    <td className="p-2">
-                      <select
-                        value={item.category}
-                        onChange={e => handleUpdateItem(item.id, { category: e.target.value as any })}
-                        className="w-full border border-slate-300 rounded p-1 text-xs"
-                      >
-                        <option value="surgeon_fee">Surgeon Fee</option>
-                        <option value="consumable">Consumables</option>
-                        <option value="ot_charges">OT Charges</option>
-                        <option value="investigation">Investigation</option>
-                        <option value="room">Room / Daycare</option>
-                        <option value="pharmacy">Pharmacy</option>
-                        <option value="other">Other</option>
-                      </select>
-                    </td>
-                    <td className="p-2 text-center">
-                      <input
-                        type="number"
-                        min="1"
-                        value={item.quantity}
-                        onChange={e => handleUpdateItem(item.id, { quantity: Number(e.target.value) })}
-                        className="w-12 text-center border border-slate-300 rounded p-1 text-xs"
-                      />
-                    </td>
-                    <td className="p-2 text-right">
-                      <input
-                        type="number"
-                        value={item.unitPrice}
-                        onChange={e => handleUpdateItem(item.id, { unitPrice: Number(e.target.value) })}
-                        className="w-20 text-right border border-slate-300 rounded p-1 text-xs font-mono"
-                      />
-                    </td>
-                    <td className="p-2 text-right font-mono font-bold text-slate-900">
-                      ₹{item.amount.toLocaleString('en-IN')}
-                    </td>
-                    <td className="p-2 text-center">
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveItem(item.id)}
-                        className="text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {items.map((item, index) => {
+                  const isConsumable = item.category === 'consumable';
+
+                  return (
+                    <tr key={item.id} className="hover:bg-slate-50/50">
+                      <td className="p-2 text-center text-slate-400 font-mono">{index + 1}</td>
+
+                      {/* Category Selector */}
+                      <td className="p-2">
+                        <select
+                          value={item.category}
+                          onChange={e => handleUpdateItem(item.id, { category: e.target.value as BillItemCategory })}
+                          className="w-full border border-slate-300 rounded p-1 text-xs bg-white font-medium"
+                        >
+                          <option value="consumable">Consumable (Rate Card)</option>
+                          <option value="surgeon_fee">Surgeon Fee</option>
+                          <option value="ot_charges">OT Charges</option>
+                          <option value="investigation">Investigation</option>
+                          <option value="room">Room / Daycare</option>
+                          <option value="pharmacy">Pharmacy</option>
+                          <option value="other">Other</option>
+                        </select>
+                      </td>
+
+                      {/* Subcategory / Rate Card Dropdown */}
+                      <td className="p-2">
+                        {isConsumable ? (
+                          <select
+                            value={item.consumableId || ''}
+                            onChange={e => handleUpdateItem(item.id, { consumableId: e.target.value })}
+                            className="w-full border border-blue-400 rounded p-1 text-xs bg-blue-50/50 font-semibold text-blue-950"
+                          >
+                            <option value="">-- Select Rate Card Item --</option>
+                            {consumablesRateCard.map(c => (
+                              <option key={c.id} value={c.id}>
+                                {c.name} {c.unitPrice ? `(₹${c.unitPrice.toLocaleString('en-IN')})` : ''}
+                              </option>
+                            ))}
+                          </select>
+                        ) : item.category === 'surgeon_fee' ? (
+                          <select
+                            onChange={e => {
+                              const val = e.target.value;
+                              if (val) {
+                                handleUpdateItem(item.id, {
+                                  description: val,
+                                  unitPrice: val.includes('Bilateral') ? 45000 : 25000,
+                                });
+                              }
+                            }}
+                            className="w-full border border-slate-300 rounded p-1 text-xs bg-white"
+                          >
+                            <option value="">-- Standard Procedure --</option>
+                            <option value="Surgeon fee towards Phacoemulsification with Foldable IOL">Phaco with Foldable IOL (₹25,000)</option>
+                            <option value="Surgeon fee towards Trabeculectomy with MMC">Trabeculectomy with MMC (₹24,000)</option>
+                            <option value="Surgeon fee towards Bilateral Femto-LASIK">Bilateral Femto-LASIK (₹45,000)</option>
+                            <option value="Surgeon fee towards Vitrectomy & Endolaser">Vitrectomy & Endolaser (₹30,000)</option>
+                          </select>
+                        ) : item.category === 'ot_charges' ? (
+                          <select
+                            onChange={e => {
+                              const val = e.target.value;
+                              if (val) {
+                                handleUpdateItem(item.id, {
+                                  description: val,
+                                  unitPrice: val.includes('Daycare') ? 4000 : 7000,
+                                });
+                              }
+                            }}
+                            className="w-full border border-slate-300 rounded p-1 text-xs bg-white"
+                          >
+                            <option value="">-- Standard OT Particulars --</option>
+                            <option value="Operation Theatre & Phaco Machine Sterilization charges">OT & Phaco Machine Sterilization (₹7,000)</option>
+                            <option value="Daycare Bed & Nursing Care charges">Daycare Bed & Nursing Care (₹4,000)</option>
+                            <option value="Anaesthesia & Monitored Care">Anaesthesia & Monitored Care (₹5,000)</option>
+                          </select>
+                        ) : (
+                          <span className="text-slate-400 text-[11px] italic">Custom service</span>
+                        )}
+                      </td>
+
+                      {/* Description - User Request #3: Description is optional */}
+                      <td className="p-2">
+                        <input
+                          type="text"
+                          value={item.description}
+                          onChange={e => handleUpdateItem(item.id, { description: e.target.value })}
+                          placeholder={isConsumable ? '(Optional extra details or notes)' : '(Optional description)'}
+                          className="w-full border border-slate-300 rounded p-1 text-xs bg-white placeholder:text-slate-400"
+                        />
+                      </td>
+
+                      {/* Quantity */}
+                      <td className="p-2 text-center">
+                        <input
+                          type="number"
+                          min="1"
+                          value={item.quantity}
+                          onChange={e => handleUpdateItem(item.id, { quantity: Number(e.target.value) })}
+                          className="w-12 text-center border border-slate-300 rounded p-1 text-xs"
+                        />
+                      </td>
+
+                      {/* Rate (Auto-populated from Rate Card for consumables!) */}
+                      <td className="p-2 text-right">
+                        <input
+                          type="number"
+                          value={item.unitPrice}
+                          onChange={e => handleUpdateItem(item.id, { unitPrice: Number(e.target.value) })}
+                          className="w-20 text-right border border-slate-300 rounded p-1 text-xs font-mono font-semibold"
+                        />
+                      </td>
+
+                      {/* Line Amount */}
+                      <td className="p-2 text-right font-mono font-bold text-slate-900">
+                        ₹{item.amount.toLocaleString('en-IN')}
+                      </td>
+
+                      {/* Delete Line */}
+                      <td className="p-2 text-center">
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveItem(item.id)}
+                          className="text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1476,7 +1876,7 @@ const BillEditModal: React.FC<BillEditModalProps> = ({
                 <span>₹{subtotal.toLocaleString('en-IN')}</span>
               </div>
               <div className="flex justify-between items-center text-slate-600">
-                <span>Discount (₹):</span>
+                <span>Discount / Concession (₹):</span>
                 <input
                   type="number"
                   value={discount || ''}
@@ -1485,12 +1885,12 @@ const BillEditModal: React.FC<BillEditModalProps> = ({
                 />
               </div>
               <div className="flex justify-between font-bold text-slate-900 pt-1 border-t border-slate-200">
-                <span>Gross Total Bill:</span>
+                <span>Gross Total {isBill ? 'Bill' : 'Estimate'}:</span>
                 <span>₹{grossTotal.toLocaleString('en-IN')}</span>
               </div>
               {isInsured && (
                 <div className="flex justify-between text-blue-700 font-semibold">
-                  <span>Less Insurance Approved:</span>
+                  <span>Less Insurance {isBill ? 'Approved' : 'Expected'}:</span>
                   <span>-₹{finalApprovedAmount.toLocaleString('en-IN')}</span>
                 </div>
               )}
@@ -1512,9 +1912,13 @@ const BillEditModal: React.FC<BillEditModalProps> = ({
             </button>
             <button
               type="submit"
-              className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-xs transition-colors cursor-pointer"
+              className={`px-5 py-2 text-white font-semibold rounded-lg shadow-xs transition-colors cursor-pointer ${
+                isBill ? 'bg-blue-600 hover:bg-blue-700' : 'bg-amber-600 hover:bg-amber-700'
+              }`}
             >
-              {bill ? 'Save Bill Changes' : 'Generate & Save Bill'}
+              {isBill
+                ? (existingBill ? 'Save Bill Changes' : 'Generate & Save Bill')
+                : (existingEstimate ? 'Save Estimate Changes' : 'Generate & Save Estimate')}
             </button>
           </div>
         </form>

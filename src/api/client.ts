@@ -13,6 +13,8 @@ import {
   PatientBillingSummary,
   PaymentMode,
   BillPaymentStatus,
+  Estimate,
+  EstimateStatus,
 } from '../types';
 
 /**
@@ -40,8 +42,8 @@ const STORAGE_KEYS = {
   POSTOP_CARE: 'abhinavas_eyecare_postop_care',
   BILLS: 'abhinavas_eyecare_bills',
   RECEIPTS: 'abhinavas_eyecare_receipts',
+  ESTIMATES: 'abhinavas_eyecare_estimates',
 };
-
 
 export const SEED_HOSPITALS: HospitalSetting[] = [
   {
@@ -75,14 +77,14 @@ export const SEED_HOSPITALS: HospitalSetting[] = [
 ];
 
 export const SEED_CONSUMABLES: ConsumableSetting[] = [
-  { id: 'cons_1', name: 'Foldable Hydrophobic Monofocal IOL' },
-  { id: 'cons_2', name: 'Foldable Hydrophobic Toric IOL' },
-  { id: 'cons_3', name: 'Multifocal PanOptix IOL + Viscoelastic' },
-  { id: 'cons_4', name: 'EDOF (Extended Depth of Focus) IOL' },
-  { id: 'cons_5', name: 'Viscoelastic (2% HPMC + Healon GV)' },
-  { id: 'cons_6', name: 'Trypan Blue + CTR Ring + Viscoat' },
-  { id: 'cons_7', name: '25G Vitrectomy Pack + Silicone Oil' },
-  { id: 'cons_8', name: 'Custom Corneal Blade 2.8mm + Side Port 1.2mm' },
+  { id: 'cons_1', name: 'Foldable Hydrophobic Monofocal IOL', unitPrice: 12000, category: 'IOL' },
+  { id: 'cons_2', name: 'Foldable Hydrophobic Toric IOL', unitPrice: 18000, category: 'IOL' },
+  { id: 'cons_3', name: 'Multifocal PanOptix IOL + Viscoelastic', unitPrice: 35000, category: 'IOL' },
+  { id: 'cons_4', name: 'EDOF (Extended Depth of Focus) IOL', unitPrice: 28000, category: 'IOL' },
+  { id: 'cons_5', name: 'Viscoelastic (2% HPMC + Healon GV)', unitPrice: 3500, category: 'Viscoelastic' },
+  { id: 'cons_6', name: 'Trypan Blue + CTR Ring + Viscoat', unitPrice: 4500, category: 'Surgical Pack' },
+  { id: 'cons_7', name: '25G Vitrectomy Pack + Silicone Oil', unitPrice: 15000, category: 'Surgical Pack' },
+  { id: 'cons_8', name: 'Custom Corneal Blade 2.8mm + Side Port 1.2mm', unitPrice: 2500, category: 'Blade' },
 ];
 
 export const SEED_COUNSELLORS: CounsellorSetting[] = [
@@ -401,8 +403,61 @@ export const SEED_RECEIPTS: Receipt[] = [
   },
 ];
 
+export const SEED_ESTIMATES: Estimate[] = [
+  {
+    id: 'est_001',
+    estimateNumber: 'AEC/EST/2026/0101',
+    patientId: 'IP-2026-104',
+    uhid: 'AEC-9452',
+    patientName: 'Meenakshi Sundaram',
+    estimateDate: '2026-10-18',
+    validUntil: '2026-11-18',
+    surgeryDate: '2026-11-02',
+    surgeryDetails: 'Right eye Trabeculectomy with Mitomycin-C (MMC)',
+    doctorName: 'Dr. Karthik Raman',
+    items: [
+      {
+        id: 'est_item_1',
+        description: 'Surgeon fee towards Right eye Trabeculectomy on 02/11/2026',
+        category: 'surgeon_fee',
+        quantity: 1,
+        unitPrice: 24000,
+        amount: 24000,
+      },
+      {
+        id: 'est_item_2',
+        description: 'Consumables - Mitomycin-C (MMC) ampoule + 10-0 Nylon suture + Viscoat',
+        category: 'consumable',
+        consumableId: 'cons_5',
+        quantity: 1,
+        unitPrice: 11000,
+        amount: 11000,
+      },
+      {
+        id: 'est_item_3',
+        description: 'Operation Theatre & Daycare Glaucoma Suite charges',
+        category: 'ot_charges',
+        quantity: 1,
+        unitPrice: 7000,
+        amount: 7000,
+      },
+    ],
+    subtotal: 42000,
+    discount: 0,
+    tax: 0,
+    totalAmount: 42000,
+    isInsured: false,
+    patientEstimatedNetPayable: 42000,
+    status: 'Active',
+    notes: 'Surgical cost estimate issued for planned trabeculectomy.',
+    createdAt: '2026-10-18T09:00:00Z',
+    updatedAt: '2026-10-18T09:00:00Z',
+  },
+];
+
 // Seed default hospital staff
 const SEED_USERS: User[] = [
+
   {
     id: 'usr_admin',
     username: 'admin',
@@ -646,6 +701,33 @@ function ensureInitialized(): void {
   }
   if (!localStorage.getItem(STORAGE_KEYS.CONSUMABLES)) {
     localStorage.setItem(STORAGE_KEYS.CONSUMABLES, JSON.stringify(SEED_CONSUMABLES));
+  } else {
+    // Enrich existing consumables with rate card unitPrice if missing
+    try {
+      const storedConsumables: ConsumableSetting[] = JSON.parse(
+        localStorage.getItem(STORAGE_KEYS.CONSUMABLES) || '[]'
+      );
+      let consMod = false;
+      const updatedConsumables = storedConsumables.map(c => {
+        const seedMatch = SEED_CONSUMABLES.find(
+          s => s.id === c.id || s.name.toLowerCase().trim() === c.name.toLowerCase().trim()
+        );
+        if (seedMatch && (c.unitPrice === undefined || !c.category)) {
+          consMod = true;
+          return {
+            ...c,
+            unitPrice: c.unitPrice !== undefined ? c.unitPrice : seedMatch.unitPrice,
+            category: c.category || seedMatch.category,
+          };
+        }
+        return c;
+      });
+      if (consMod) {
+        localStorage.setItem(STORAGE_KEYS.CONSUMABLES, JSON.stringify(updatedConsumables));
+      }
+    } catch {
+      // ignore
+    }
   }
   if (!localStorage.getItem(STORAGE_KEYS.COUNSELLORS)) {
     localStorage.setItem(STORAGE_KEYS.COUNSELLORS, JSON.stringify(SEED_COUNSELLORS));
@@ -668,7 +750,11 @@ function ensureInitialized(): void {
   if (!localStorage.getItem(STORAGE_KEYS.RECEIPTS)) {
     localStorage.setItem(STORAGE_KEYS.RECEIPTS, JSON.stringify(SEED_RECEIPTS));
   }
+  if (!localStorage.getItem(STORAGE_KEYS.ESTIMATES)) {
+    localStorage.setItem(STORAGE_KEYS.ESTIMATES, JSON.stringify(SEED_ESTIMATES));
+  }
 }
+
 
 
 // Generate unique ID
@@ -1361,14 +1447,29 @@ export const ApiClient = {
     if (consumableData.id) {
       const idx = consumables.findIndex(c => c.id === consumableData.id);
       if (idx !== -1) {
-        saved = { ...consumables[idx], name: consumableData.name.trim() };
+        saved = {
+          ...consumables[idx],
+          name: consumableData.name.trim(),
+          unitPrice: consumableData.unitPrice !== undefined ? Number(consumableData.unitPrice) : consumables[idx].unitPrice,
+          category: consumableData.category?.trim() || consumables[idx].category,
+        };
         consumables[idx] = saved;
       } else {
-        saved = { id: consumableData.id, name: consumableData.name.trim() };
+        saved = {
+          id: consumableData.id,
+          name: consumableData.name.trim(),
+          unitPrice: consumableData.unitPrice !== undefined ? Number(consumableData.unitPrice) : undefined,
+          category: consumableData.category?.trim(),
+        };
         consumables.push(saved);
       }
     } else {
-      saved = { id: generateId('cons'), name: consumableData.name.trim() };
+      saved = {
+        id: generateId('cons'),
+        name: consumableData.name.trim(),
+        unitPrice: consumableData.unitPrice !== undefined ? Number(consumableData.unitPrice) : undefined,
+        category: consumableData.category?.trim(),
+      };
       consumables.push(saved);
     }
 
@@ -1384,9 +1485,13 @@ export const ApiClient = {
       targetType: 'Settings',
       targetId: saved.id,
       targetName: saved.name,
-      changes: [{ field: 'consumable', from: '', to: saved.name }],
-      details: `Saved consumable: ${saved.name}`,
+      changes: [
+        { field: 'consumable', from: '', to: saved.name },
+        { field: 'unitPrice', from: '', to: saved.unitPrice ? `₹${saved.unitPrice}` : 'N/A' },
+      ],
+      details: `Saved consumable rate card item: ${saved.name} (Rate: ₹${saved.unitPrice || 0})`,
     });
+
 
     return saved;
   },
@@ -1688,9 +1793,205 @@ export const ApiClient = {
   },
 
   /**
+   * Estimates (Pre-Billing Cost Estimates)
+   */
+  async getEstimates(): Promise<Estimate[]> {
+    ensureInitialized();
+    const raw = localStorage.getItem(STORAGE_KEYS.ESTIMATES);
+    if (!raw) return SEED_ESTIMATES;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return SEED_ESTIMATES;
+    }
+  },
+
+  async getEstimateById(estimateId: string): Promise<Estimate | undefined> {
+    const estimates = await this.getEstimates();
+    return estimates.find(e => e.id === estimateId || e.estimateNumber === estimateId);
+  },
+
+  async saveEstimate(
+    estimateData: Omit<Estimate, 'id' | 'createdAt' | 'updatedAt'> & { id?: string },
+    actor: User
+  ): Promise<Estimate> {
+    ensureInitialized();
+    const estimates = await this.getEstimates();
+    const isNew = !estimateData.id;
+    const now = new Date().toISOString();
+
+    const subtotal = estimateData.items.reduce((acc, item) => acc + (Number(item.amount) || 0), 0);
+    const discount = Number(estimateData.discount) || 0;
+    const tax = Number(estimateData.tax) || 0;
+    const totalAmount = Math.max(0, subtotal - discount + tax);
+
+    let patientEstimatedNetPayable = totalAmount;
+    if (estimateData.isInsured) {
+      const estimatedCoverage = Number(estimateData.estimatedInsuranceCoverage || estimateData.preAuthAmount) || 0;
+      patientEstimatedNetPayable = Math.max(0, totalAmount - estimatedCoverage);
+    }
+
+    let estimateNumber = estimateData.estimateNumber;
+    if (!estimateNumber || estimateNumber.trim() === '') {
+      const year = new Date().getFullYear();
+      const nextNum = estimates.length + 101;
+      estimateNumber = `AEC/EST/${year}/${String(nextNum).padStart(4, '0')}`;
+    }
+
+    const estimateId = estimateData.id || generateId('est');
+    const savedEstimate: Estimate = {
+      ...estimateData,
+      id: estimateId,
+      estimateNumber,
+      subtotal,
+      discount,
+      tax,
+      totalAmount,
+      patientEstimatedNetPayable,
+      status: estimateData.status || 'Active',
+      createdAt: isNew ? now : (estimates.find(e => e.id === estimateId)?.createdAt || now),
+      updatedAt: now,
+    };
+
+    let updatedEstimates: Estimate[];
+    if (isNew) {
+      updatedEstimates = [savedEstimate, ...estimates];
+    } else {
+      updatedEstimates = estimates.map(e => (e.id === estimateId ? savedEstimate : e));
+    }
+
+    localStorage.setItem(STORAGE_KEYS.ESTIMATES, JSON.stringify(updatedEstimates));
+
+    await this.recordAuditEvent({
+      id: generateId('audit'),
+      timestamp: now,
+      actorId: actor.id,
+      actorName: actor.name,
+      actorRole: actor.role,
+      action: isNew ? 'Generated Treatment Estimate' : 'Updated Treatment Estimate',
+      targetType: 'Estimate',
+      targetId: savedEstimate.id,
+      targetName: savedEstimate.patientName,
+      changes: [
+        { field: 'estimateNumber', from: '', to: savedEstimate.estimateNumber },
+        { field: 'totalAmount', from: '', to: `₹${savedEstimate.totalAmount}` },
+        { field: 'estimatedPayable', from: '', to: `₹${savedEstimate.patientEstimatedNetPayable}` },
+      ],
+      details: `${isNew ? 'Generated' : 'Updated'} cost estimate ${savedEstimate.estimateNumber} for ${savedEstimate.patientName} (${savedEstimate.uhid || savedEstimate.patientId}) - Total: ₹${savedEstimate.totalAmount}`,
+    });
+
+    return savedEstimate;
+  },
+
+  async deleteEstimate(estimateId: string, actor: User): Promise<boolean> {
+    ensureInitialized();
+    const estimates = await this.getEstimates();
+    const target = estimates.find(e => e.id === estimateId);
+    if (!target) return false;
+
+    const filtered = estimates.filter(e => e.id !== estimateId);
+    localStorage.setItem(STORAGE_KEYS.ESTIMATES, JSON.stringify(filtered));
+
+    await this.recordAuditEvent({
+      id: generateId('audit'),
+      timestamp: new Date().toISOString(),
+      actorId: actor.id,
+      actorName: actor.name,
+      actorRole: actor.role,
+      action: 'Deleted Treatment Estimate',
+      targetType: 'Estimate',
+      targetId: estimateId,
+      targetName: target.patientName,
+      changes: [{ field: 'estimate', from: target.estimateNumber, to: 'Deleted' }],
+      details: `Removed estimate ${target.estimateNumber} for ${target.patientName}`,
+    });
+
+    return true;
+  },
+
+  async convertEstimateToBill(estimateId: string, actor: User): Promise<Bill> {
+    ensureInitialized();
+    const estimate = await this.getEstimateById(estimateId);
+    if (!estimate) {
+      throw new Error(`Estimate with ID ${estimateId} not found.`);
+    }
+
+    // Generate new Bill
+    const bill = await this.saveBill(
+      {
+        billNumber: '',
+        patientId: estimate.patientId,
+        uhid: estimate.uhid,
+        patientName: estimate.patientName,
+        billDate: new Date().toISOString().split('T')[0],
+        counsellingId: estimate.counsellingId,
+        surgeryDate: estimate.surgeryDate,
+        surgeryDetails: estimate.surgeryDetails,
+        doctorName: estimate.doctorName,
+        items: estimate.items.map(item => ({ ...item, id: generateId('item') })),
+        subtotal: estimate.subtotal,
+        discount: estimate.discount,
+        tax: estimate.tax,
+        totalAmount: estimate.totalAmount,
+        isInsured: estimate.isInsured,
+        insuranceCompany: estimate.insuranceCompany,
+        tpaName: estimate.tpaName,
+        policyNumber: estimate.policyNumber,
+        preAuthAmount: estimate.preAuthAmount,
+        finalApprovedAmount: estimate.estimatedInsuranceCoverage || estimate.preAuthAmount || 0,
+        coPayPercent: estimate.coPayPercent,
+        coPayAmount: estimate.coPayAmount,
+        nonMedicalDeductions: estimate.nonMedicalDeductions,
+        patientNetPayable: estimate.patientEstimatedNetPayable,
+        paidAmount: 0,
+        balanceDue: estimate.patientEstimatedNetPayable,
+        status: 'Generated',
+        notes: `Converted from Estimate ${estimate.estimateNumber}. ${estimate.notes || ''}`.trim(),
+      },
+      actor
+    );
+
+    // Update estimate state to 'Converted to Bill'
+    const estimates = await this.getEstimates();
+    const updatedEstimates = estimates.map(e => {
+      if (e.id === estimateId) {
+        return {
+          ...e,
+          status: 'Converted to Bill' as EstimateStatus,
+          convertedBillId: bill.id,
+          convertedBillNumber: bill.billNumber,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+      return e;
+    });
+    localStorage.setItem(STORAGE_KEYS.ESTIMATES, JSON.stringify(updatedEstimates));
+
+    await this.recordAuditEvent({
+      id: generateId('audit'),
+      timestamp: new Date().toISOString(),
+      actorId: actor.id,
+      actorName: actor.name,
+      actorRole: actor.role,
+      action: 'Converted Estimate to Bill',
+      targetType: 'Estimate',
+      targetId: estimate.id,
+      targetName: estimate.patientName,
+      changes: [
+        { field: 'status', from: estimate.status, to: 'Converted to Bill' },
+        { field: 'billNumber', from: '', to: bill.billNumber },
+      ],
+      details: `Converted Estimate ${estimate.estimateNumber} into Hospital Bill ${bill.billNumber} for ${bill.patientName}`,
+    });
+
+    return bill;
+  },
+
+  /**
    * Billing & Receipts Methods
    */
   async getBills(): Promise<Bill[]> {
+
     ensureInitialized();
     const raw = localStorage.getItem(STORAGE_KEYS.BILLS);
     if (!raw) return SEED_BILLS;
@@ -2037,6 +2338,7 @@ export const ApiClient = {
     localStorage.setItem(STORAGE_KEYS.POSTOP_CARE, DEFAULT_POSTOP_CARE);
     localStorage.setItem(STORAGE_KEYS.BILLS, JSON.stringify(SEED_BILLS));
     localStorage.setItem(STORAGE_KEYS.RECEIPTS, JSON.stringify(SEED_RECEIPTS));
+    localStorage.setItem(STORAGE_KEYS.ESTIMATES, JSON.stringify(SEED_ESTIMATES));
   },
 
   getStorageStats(): { userCount: number; patientCount: number; auditCount: number; sizeKb: number } {
@@ -2051,6 +2353,7 @@ export const ApiClient = {
     const counsellingStr = localStorage.getItem(STORAGE_KEYS.COUNSELLING) || '[]';
     const billsStr = localStorage.getItem(STORAGE_KEYS.BILLS) || '[]';
     const receiptsStr = localStorage.getItem(STORAGE_KEYS.RECEIPTS) || '[]';
+    const estimatesStr = localStorage.getItem(STORAGE_KEYS.ESTIMATES) || '[]';
 
     const totalBytes =
       (usersStr.length +
@@ -2061,7 +2364,8 @@ export const ApiClient = {
         counsellorsStr.length +
         counsellingStr.length +
         billsStr.length +
-        receiptsStr.length) *
+        receiptsStr.length +
+        estimatesStr.length) *
       2;
     return {
       userCount: JSON.parse(usersStr).length,
@@ -2071,6 +2375,7 @@ export const ApiClient = {
     };
   },
 };
+
 
 
 // Expose ApiClient and isLiveServer on window object for inspection/testing

@@ -61,7 +61,7 @@ export interface AuditEvent {
   actorName: string;
   actorRole: UserRole;
   action: string; // e.g. "Registered Patient", "Updated Patient", "Changed Billing Status", "Reset Staff PIN"
-  targetType: 'Patient' | 'Billing' | 'Staff' | 'System' | 'Counselling' | 'Settings';
+  targetType: 'Patient' | 'Billing' | 'Staff' | 'System' | 'Counselling' | 'Settings' | 'Estimate' | 'Report';
   targetId: string; // patient id or username
   targetName: string; // patient name or staff name
   changes: FieldChange[];
@@ -79,7 +79,10 @@ export interface HospitalSetting {
 export interface ConsumableSetting {
   id: string;
   name: string;
+  unitPrice?: number; // Rate card price in ₹
+  category?: string; // Rate card category e.g. IOL, Viscoelastic, Pack, Blade
 }
+
 
 export interface CounsellorSetting {
   id: string;
@@ -129,9 +132,51 @@ export interface BillItem {
   id: string;
   description: string;
   category: BillItemCategory;
+  consumableId?: string;
   quantity: number;
   unitPrice: number;
   amount: number;
+}
+
+export type EstimateStatus = 
+  | 'Active' 
+  | 'Converted to Bill' 
+  | 'Expired';
+
+export interface Estimate {
+  id: string; // e.g. est_001
+  estimateNumber: string; // e.g. AEC/EST/2026/0101
+  patientId: string;
+  uhid: string;
+  patientName: string;
+  estimateDate: string; // YYYY-MM-DD
+  validUntil?: string; // YYYY-MM-DD
+  counsellingId?: string;
+  surgeryDate?: string; // YYYY-MM-DD
+  surgeryDetails?: string;
+  doctorName?: string;
+  items: BillItem[];
+  subtotal: number;
+  discount: number;
+  tax: number;
+  totalAmount: number;
+  // Insurance details
+  isInsured: boolean;
+  insuranceCompany?: string;
+  tpaName?: string;
+  policyNumber?: string;
+  preAuthAmount?: number;
+  estimatedInsuranceCoverage?: number;
+  coPayPercent?: number;
+  coPayAmount?: number;
+  nonMedicalDeductions?: number;
+  patientEstimatedNetPayable: number;
+  status: EstimateStatus;
+  convertedBillId?: string;
+  convertedBillNumber?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type BillPaymentStatus = 
@@ -141,6 +186,7 @@ export type BillPaymentStatus =
   | 'Settled' 
   | 'Refundable' 
   | 'Cancelled';
+
 
 export interface Bill {
   id: string; // e.g. BILL-2026-001

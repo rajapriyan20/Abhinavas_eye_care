@@ -11,9 +11,10 @@ import {
   HeartHandshake,
   Settings,
   Receipt,
+  BarChart3,
 } from 'lucide-react';
 
-export type TabType = 'overview' | 'patients' | 'counselling' | 'billing' | 'settings' | 'users' | 'audit';
+export type TabType = 'overview' | 'patients' | 'counselling' | 'billing' | 'reports' | 'settings' | 'users' | 'audit';
 
 interface SidebarProps {
   activeTab: TabType;
@@ -56,6 +57,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Billing',
       sublabel: 'Bills, Receipts & Ledger',
       icon: Receipt,
+    },
+    {
+      id: 'reports' as const,
+      label: 'Reports',
+      sublabel: 'Admissions, Surgeries & Audit',
+      icon: BarChart3,
     },
     {
       id: 'settings' as const,
